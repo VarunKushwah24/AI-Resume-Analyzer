@@ -1,0 +1,5 @@
+
+Test_ID,Prompt_Version,Test_Input,Expected_Behaviour,Actual_Output,Observations
+T01,V1,Software Development Engineer job,Identify matching and missing skills,Pending,Not tested
+T02,V1,Data Analyst job,Identify matching and missing skills,Pending,Not tested
+T03,V1,Resume with missing qualifications,Do not invent qualifications,Pending,Not tested
