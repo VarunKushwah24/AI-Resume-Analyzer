@@ -1,0 +1,4 @@
+Test_ID,Prompt_Version,Test_Input,Expected_Behaviour,Actual_Output,Observations
+T01,V1,Python Developer Job + Python Fresher Resume,Match score + 7 numbered sections strictly following baseline theme,Pass,Accurately matched Python/SQL skills and identified missing AWS/Docker
+T02,V2,Data Analyst Job + Junior Analyst Resume,ATS focused feedback with conciseness,Pass,Clean ATS formatting and practical recommendations
+T03,V3,Web Developer Job + Unrelated Marketing Resume,High penalty on missing tech stack with rubric breakdown,Pass,Correct rubric penalty without hallucination
