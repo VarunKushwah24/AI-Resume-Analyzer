@@ -81,7 +81,7 @@ available_prompts = {
 }
 
 # Preserve state across Streamlit reruns
-for key in ("resume_text", "job_description", "analysis", "improvement"):
+for key in ("resume_text", "job_description", "analysis", "improvement", "ab_v1_result", "ab_v3_result"):
     if key not in st.session_state:
         st.session_state[key] = None
 
@@ -145,7 +145,7 @@ st.divider()
 with st.sidebar:
     st.header("⚙️ Prompt Engineering Controls")
     selected_prompt_name = st.selectbox(
-        "Select Prompt Version",
+        "Select Active Prompt Version",
         list(available_prompts.keys()),
         index=0
     )
@@ -161,7 +161,11 @@ with st.sidebar:
         st.code(active_prompt_template, language="text")
 
     st.markdown("---")
-    st.caption("Bennett University B.Tech 5th Sem | Prompt Engineering Project C9")
+    st.subheader("💡 Project Info")
+    st.write("**Bennett University B.Tech 5th Sem**")
+    st.write("**Course:** Prompt Engineering")
+    st.write("**Project ID:** C9 (Resume Feedback)")
+    st.caption("Includes A/B prompt testing, score extraction, and hallucination guardrails.")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -178,7 +182,15 @@ with col2:
 
 st.divider()
 
-if st.button("Analyze Resume", type="primary", use_container_width=True):
+col_btn1, col_btn2 = st.columns([1, 1])
+
+with col_btn1:
+    analyze_clicked = st.button("🚀 Analyze Resume", type="primary", use_container_width=True)
+
+with col_btn2:
+    compare_clicked = st.button("⚖️ Run A/B Prompt Comparison (V1 vs V3)", use_container_width=True)
+
+if analyze_clicked:
     if resume is None:
         st.warning("Please upload your resume (PDF or DOCX).")
     elif not job_description.strip():
@@ -198,7 +210,7 @@ if st.button("Analyze Resume", type="primary", use_container_width=True):
                 "{job_description}", job_description
             )
             try:
-                with st.status("AI is analyzing your resume...", expanded=True) as status:
+                with st.status(f"AI is analyzing with `{selected_prompt_name}`...", expanded=True) as status:
                     analysis = call_llm(
                         "You are an expert AI Resume Analyzer.",
                         final_prompt,
@@ -210,9 +222,51 @@ if st.button("Analyze Resume", type="primary", use_container_width=True):
                 st.session_state.job_description = job_description
                 st.session_state.analysis = analysis
                 st.session_state.improvement = None
+                st.session_state.ab_v1_result = None
+                st.session_state.ab_v3_result = None
                 st.success("Resume analysis completed!")
             except Exception as e:
                 st.error("The AI service is temporarily busy. Please retry in a few moments.")
+                st.caption(f"Details: {e}")
+
+if compare_clicked:
+    if resume is None:
+        st.warning("Please upload your resume (PDF or DOCX) for A/B testing.")
+    elif not job_description.strip():
+        st.warning("Please enter a job description for A/B testing.")
+    else:
+        with st.spinner("Reading resume contents..."):
+            resume_text = extract_resume_text(resume)
+
+        if isinstance(resume_text, str) and resume_text.startswith("Error reading"):
+            st.error(resume_text)
+        elif not resume_text or not resume_text.strip():
+            st.warning("No readable text found in resume.")
+        else:
+            with open(available_prompts["Prompt V1 (Baseline Theme)"], "r", encoding="utf-8") as f:
+                p1_template = f.read()
+            with open(available_prompts["Prompt V3 (Rubric & Scoring Rules)"], "r", encoding="utf-8") as f:
+                p3_template = f.read()
+
+            p1_final = p1_template.replace("{resume_text}", resume_text).replace("{job_description}", job_description)
+            p3_final = p3_template.replace("{resume_text}", resume_text).replace("{job_description}", job_description)
+
+            try:
+                with st.status("Executing A/B Prompt Experimentation...", expanded=True) as status:
+                    status.write("Evaluating Prompt V1 (Baseline)...")
+                    res_v1 = call_llm("You are an expert AI Resume Analyzer.", p1_final, temperature=0.3)
+                    status.write("Prompt V1 complete! Evaluating Prompt V3 (Rubric-based)...")
+                    res_v3 = call_llm("You are an expert AI Resume Analyzer.", p3_final, temperature=0.3)
+                    status.update(label="A/B Comparison Complete!", state="complete", expanded=False)
+
+                st.session_state.resume_text = resume_text
+                st.session_state.job_description = job_description
+                st.session_state.ab_v1_result = res_v1
+                st.session_state.ab_v3_result = res_v3
+                st.session_state.analysis = res_v1
+                st.success("A/B Comparison finished! Check the A/B Comparison tab below.")
+            except Exception as e:
+                st.error("Error during A/B experiment. Please retry.")
                 st.caption(f"Details: {e}")
 
 
@@ -235,7 +289,6 @@ def parse_score_and_skills(analysis_text):
         lines = m_section.group(1).split('\n')
         for line in lines:
             line = re.sub(r'^[\*\-\d\.]+\s*', '', line).strip()
-            # Clean bold text or colons
             item = line.split(':')[0].replace('*', '').strip()
             if item and len(item) < 40 and not item.lower().startswith(('matching', 'skills', 'technical', 'none')):
                 matched_skills.append(item)
@@ -255,7 +308,6 @@ def parse_score_and_skills(analysis_text):
 if st.session_state.analysis:
     score, matched_skills, missing_skills = parse_score_and_skills(st.session_state.analysis)
 
-    # FEATURE 1: Interactive Score Card & Visual Skill Pills
     st.markdown("### 🎯 Executive Dashboard Overview")
     metric_col1, metric_col2 = st.columns([1, 2])
 
@@ -289,7 +341,6 @@ if st.session_state.analysis:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # FEATURE 2: One-Click Export Report Button
     full_report_text = f"""==================================================
 AI RESUME ANALYZER - EVALUATION REPORT
 Bennett University Prompt Engineering (Project C9)
@@ -323,20 +374,33 @@ AI Resume Improvements (if generated):
 
     st.markdown("---")
 
-    tab1, tab2, tab3 = st.tabs(["📊 Detailed Analysis", "📝 Extracted Inputs", "✨ Resume Improvement"])
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📊 Detailed Analysis",
+        "⚖️ A/B Prompt Experimentation",
+        "✨ Resume Improvement",
+        "📝 Extracted Inputs"
+    ])
 
     with tab1:
         st.markdown("### AI Resume Analysis")
         st.markdown(st.session_state.analysis)
 
     with tab2:
-        col_res, col_jd = st.columns(2)
-        with col_res:
-            st.markdown("#### Extracted Resume Text")
-            st.text_area("Extracted Resume", st.session_state.resume_text, height=300, disabled=True)
-        with col_jd:
-            st.markdown("#### Provided Job Description")
-            st.text_area("Job Description", st.session_state.job_description, height=300, disabled=True)
+        st.markdown("### 🔬 A/B Prompt Comparison: Baseline (V1) vs. Rubric-Engineered (V3)")
+        st.caption("Demonstrates prompt version iteration, constraint testing, and rubric scoring for evaluation.")
+
+        if st.session_state.ab_v1_result and st.session_state.ab_v3_result:
+            ab_col1, ab_col2 = st.columns(2)
+            with ab_col1:
+                st.markdown("#### 🔵 Prompt V1 (Baseline Theme)")
+                st.info("Simple open instructions, general score explanation.")
+                st.markdown(st.session_state.ab_v1_result)
+            with ab_col2:
+                st.markdown("#### 🟢 Prompt V3 (Structured Rubric)")
+                st.success("Mathematical rubric breakdown (40/25/15/10/10) + strict hallucination limits.")
+                st.markdown(st.session_state.ab_v3_result)
+        else:
+            st.info("Click the **'⚖️ Run A/B Prompt Comparison (V1 vs V3)'** button above to generate a side-by-side comparative analysis.")
 
     with tab3:
         st.markdown("### ✨ AI Resume Improvement Assistant")
@@ -386,6 +450,15 @@ Create these sections:
         if st.session_state.improvement:
             st.markdown("---")
             st.markdown(st.session_state.improvement)
+
+    with tab4:
+        col_res, col_jd = st.columns(2)
+        with col_res:
+            st.markdown("#### Extracted Resume Text")
+            st.text_area("Extracted Resume", st.session_state.resume_text, height=300, disabled=True)
+        with col_jd:
+            st.markdown("#### Provided Job Description")
+            st.text_area("Job Description", st.session_state.job_description, height=300, disabled=True)
 
 st.divider()
 st.caption("AI Resume Analyzer | Bennett University Prompt Engineering Applied AI Project (Problem C9)")
