@@ -1,5 +1,6 @@
 import time
 import os
+import re
 from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
@@ -84,7 +85,7 @@ for key in ("resume_text", "job_description", "analysis", "improvement"):
     if key not in st.session_state:
         st.session_state[key] = None
 
-# Custom styling to match user's theme screenshot
+# Custom styling for a polished look matching the dark theme
 st.markdown("""
 <style>
     .main-title {
@@ -102,11 +103,35 @@ st.markdown("""
         font-size: 0.95rem;
         margin-bottom: 1.5rem;
     }
-    .section-card {
-        background-color: #1a1c23;
-        border-radius: 8px;
+    .metric-card {
+        background: linear-gradient(135deg, #1f2430 0%, #161922 100%);
+        border: 1px solid #2d3748;
+        border-radius: 12px;
         padding: 1.2rem;
-        margin-top: 1rem;
+        text-align: center;
+        margin-bottom: 1.2rem;
+    }
+    .badge-matched {
+        display: inline-block;
+        background-color: rgba(34, 197, 94, 0.15);
+        color: #4ade80;
+        border: 1px solid rgba(34, 197, 94, 0.35);
+        border-radius: 9999px;
+        padding: 4px 12px;
+        margin: 4px;
+        font-size: 0.88rem;
+        font-weight: 500;
+    }
+    .badge-missing {
+        display: inline-block;
+        background-color: rgba(239, 68, 68, 0.15);
+        color: #f87171;
+        border: 1px solid rgba(239, 68, 68, 0.35);
+        border-radius: 9999px;
+        padding: 4px 12px;
+        margin: 4px;
+        font-size: 0.88rem;
+        font-weight: 500;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -116,7 +141,7 @@ st.markdown('<div class="subtitle">Resume Feedback Against a Job Description</di
 st.markdown('<div class="tagline">Upload your resume and compare it with a job description.</div>', unsafe_allow_html=True)
 st.divider()
 
-# Prompt selector in sidebar for Prompt Engineering project requirements
+# Prompt selector in sidebar
 with st.sidebar:
     st.header("⚙️ Prompt Engineering Controls")
     selected_prompt_name = st.selectbox(
@@ -148,7 +173,7 @@ with col2:
     job_description = st.text_area(
         "Paste the job description",
         height=220,
-        placeholder="Paste full job description including requirements and required skills..."
+        placeholder="Paste full job description including requirements and skills..."
     )
 
 st.divider()
@@ -190,8 +215,115 @@ if st.button("Analyze Resume", type="primary", use_container_width=True):
                 st.error("The AI service is temporarily busy. Please retry in a few moments.")
                 st.caption(f"Details: {e}")
 
+
+def parse_score_and_skills(analysis_text):
+    """Extract score and skills for interactive UI widgets."""
+    score = None
+    score_match = re.search(r'(?:Match Score|Score)[:\s*]+(\d{1,3})%', analysis_text, re.IGNORECASE)
+    if score_match:
+        try:
+            score = int(score_match.group(1))
+            score = max(0, min(100, score))
+        except ValueError:
+            score = None
+
+    matched_skills = []
+    missing_skills = []
+
+    m_section = re.search(r'(?:###?\s*2\.\s*MATCHING SKILLS|MATCHING SKILLS)(.*?)(?:###?\s*3\.\s*MISSING SKILLS|MISSING SKILLS|$)', analysis_text, re.DOTALL | re.IGNORECASE)
+    if m_section:
+        lines = m_section.group(1).split('\n')
+        for line in lines:
+            line = re.sub(r'^[\*\-\d\.]+\s*', '', line).strip()
+            # Clean bold text or colons
+            item = line.split(':')[0].replace('*', '').strip()
+            if item and len(item) < 40 and not item.lower().startswith(('matching', 'skills', 'technical', 'none')):
+                matched_skills.append(item)
+
+    miss_section = re.search(r'(?:###?\s*3\.\s*MISSING SKILLS|MISSING SKILLS)(.*?)(?:###?\s*4\.\s*STRENGTHS|STRENGTHS|$)', analysis_text, re.DOTALL | re.IGNORECASE)
+    if miss_section:
+        lines = miss_section.group(1).split('\n')
+        for line in lines:
+            line = re.sub(r'^[\*\-\d\.]+\s*', '', line).strip()
+            item = line.split(':')[0].replace('*', '').strip()
+            if item and len(item) < 40 and not item.lower().startswith(('missing', 'skills', 'technical', 'none')):
+                missing_skills.append(item)
+
+    return score, matched_skills[:10], missing_skills[:10]
+
+
 if st.session_state.analysis:
-    tab1, tab2, tab3 = st.tabs(["📊 Analysis Results", "📝 Extracted Inputs", "✨ Resume Improvement"])
+    score, matched_skills, missing_skills = parse_score_and_skills(st.session_state.analysis)
+
+    # FEATURE 1: Interactive Score Card & Visual Skill Pills
+    st.markdown("### 🎯 Executive Dashboard Overview")
+    metric_col1, metric_col2 = st.columns([1, 2])
+
+    with metric_col1:
+        if score is not None:
+            if score >= 75:
+                score_color = "🟢 Strong Candidate"
+            elif score >= 50:
+                score_color = "🟡 Moderate Match"
+            else:
+                score_color = "🔴 Needs Improvement"
+
+            st.metric(label="Resume Match Score", value=f"{score}%", delta=score_color)
+            st.progress(score / 100.0)
+        else:
+            st.info("Match score detailed in analysis below.")
+
+    with metric_col2:
+        if matched_skills or missing_skills:
+            if matched_skills:
+                st.markdown("**Matched Skills Found:**")
+                badges_matched_html = "".join([f'<span class="badge-matched">✓ {skill}</span>' for skill in matched_skills])
+                st.markdown(badges_matched_html, unsafe_allow_html=True)
+
+            if missing_skills:
+                st.markdown("**Important Missing Skills:**")
+                badges_missing_html = "".join([f'<span class="badge-missing">✕ {skill}</span>' for skill in missing_skills])
+                st.markdown(badges_missing_html, unsafe_allow_html=True)
+        else:
+            st.markdown("*Skills breakdown available in the detailed analysis.*")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # FEATURE 2: One-Click Export Report Button
+    full_report_text = f"""==================================================
+AI RESUME ANALYZER - EVALUATION REPORT
+Bennett University Prompt Engineering (Project C9)
+==================================================
+
+Target Job Description:
+-----------------------
+{st.session_state.job_description}
+
+Candidate Resume Text:
+----------------------
+{st.session_state.resume_text}
+
+Detailed AI Analysis:
+---------------------
+{st.session_state.analysis}
+
+==================================================
+AI Resume Improvements (if generated):
+--------------------------------------------------
+{st.session_state.improvement or 'Not generated yet.'}
+==================================================
+"""
+    st.download_button(
+        label="📥 Download Full Evaluation Report (.txt)",
+        data=full_report_text,
+        file_name="Resume_Analysis_Report.txt",
+        mime="text/plain",
+        use_container_width=True
+    )
+
+    st.markdown("---")
+
+    tab1, tab2, tab3 = st.tabs(["📊 Detailed Analysis", "📝 Extracted Inputs", "✨ Resume Improvement"])
 
     with tab1:
         st.markdown("### AI Resume Analysis")
